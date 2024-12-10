@@ -17,9 +17,6 @@ English
 ・Secure Delete Py thus combines encryption with multiple overwrite processes to provide a deletion mechanism that is suitable even for medium-grade state-level data erasure standards, ensuring that your data remains permanently deleted and irrecoverable.
 ---
 日本語
-
-以下は、「Secure Delete Py」を日本向けに説明したものです：
-
 ---
 
 # Secure Delete Py
