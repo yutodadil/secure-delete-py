@@ -87,6 +87,7 @@ def double_encrypt_with_aes_twofish(filename, no_debug):
 
     # ファイルに書き込み
     with open(filename, 'wb') as f:
+        f.truncate(0)
         f.write(doubly_encrypted_data)
 
     # Twofish暗号化結果のクリア
