@@ -1,4 +1,4 @@
-Referer:[TwoFish Algorizm 4 python/K-Czaplicki](https://github.com/K-Czaplicki/TwoFish)
+Referer:[TwoFish Algorizm 4 python/K-Czaplicki](https://github.com/K-Czaplicki/TwoFish) / [Gutmann method])https://github.com/Naranbataar/Corrupt/blob/master/main.c)
 
 English
 ---
