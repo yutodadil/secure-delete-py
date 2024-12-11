@@ -221,7 +221,7 @@ def main():
         "and is generally used in scenarios such as deleting personal information "
         "or in situations where there is a risk of swatting. Use with caution.\n"
         "Created by milkey_saurus\n"
-        "Version: 1.0.1"
+        "Version: 1.0.2"
     ), formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("path", nargs="+", help="Files or directories to shred")
     parser.add_argument("-nd", "--NoDebug", action="store_true", help="Suppress debug output")
