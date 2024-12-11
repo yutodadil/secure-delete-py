@@ -1,6 +1,7 @@
 import os
 import argparse
 import secrets
+import time
 import string
 import gc
 import ctypes
@@ -224,10 +225,26 @@ def main():
     ), formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("path", nargs="+", help="Files or directories to shred")
     parser.add_argument("-nd", "--NoDebug", action="store_true", help="Suppress debug output")
+    parser.add_argument("-bm", "--benchmark", action="store_true", help="Measure and display the time taken for processing")
     args = parser.parse_args()
+
+    # ベンチマークモードの場合、開始時間を記録
+    if args.benchmark:
+        start_time = time.monotonic()
 
     for path in args.path:
         corrupt_file_or_directory(path, args.NoDebug)
+
+    # ベンチマークモードの場合、終了時間を記録し、経過時間を計算・表示
+    if args.benchmark:
+        end_time = time.monotonic()
+        elapsed_time = end_time - start_time
+        
+        # 経過時間をHour:min:second.millisecondsで表示
+        hours, remainder = divmod(elapsed_time, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        milliseconds = (seconds % 1) * 1000
+        print("Time: {:0>2}:{:0>2}:{:05.2f}".format(int(hours), int(minutes), int(seconds)+(milliseconds / 1000)))
 
 if __name__ == "__main__":
     main()
