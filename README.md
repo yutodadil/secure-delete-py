@@ -19,19 +19,20 @@ English
 ・Secure Delete Py thus combines encryption with multiple overwrite processes to provide a deletion mechanism that is suitable even for medium-grade state-level data erasure standards, ensuring that your data remains permanently deleted and irrecoverable.
 
 ```
-usage: secure-delete.py [-h] [-nd] path [path ...]
+usage: secure-delete.py [-h] [-nd] [-bm] path [path ...]
 
 Shreds files and directories using the Gutmann method (HDD recommend), and NSA method (random random zero / SSD recommend), and AES-256bit (random iv+key) + Twofish-256bit (random key) encryption, and renames with random values.
 This is a military-grade method for handling confidential information, and is generally used in scenarios such as deleting personal information or in situations where there is a risk of swatting. Use with caution.
 Created by milkey_saurus
-Version: 1.0.1
+Version: 1.0.2
 
 positional arguments:
-  path            Files or directories to shred
+  path              Files or directories to shred
 
 options:
-  -h, --help      show this help message and exit
-  -nd, --NoDebug  Suppress debug output
+  -h, --help        show this help message and exit
+  -nd, --NoDebug    Suppress debug output
+  -bm, --benchmark  Measure and display the time taken for processing
 
 ```
 ---
@@ -55,17 +56,18 @@ options:
 ・ Secure Delete Pyは、暗号化と複数の上書きプロセスを組み合わせ、HDD、SSDともに最適化された方法で、中程度の国家レベルのデータ消去基準にも適合する削除メカニズムを提供し、データをほとんどの場合で永続的に削除し回復不可能にします。
 
 ```
-usage: secure-delete.py [-h] [-nd] path [path ...]
+usage: secure-delete.py [-h] [-nd] [-bm] path [path ...]
 
 Shreds files and directories using the Gutmann method (HDD recommend), and NSA method (random random zero / SSD recommend), and AES-256bit (random iv+key) + Twofish-256bit (random key) encryption, and renames with random values.
 This is a military-grade method for handling confidential information, and is generally used in scenarios such as deleting personal information or in situations where there is a risk of swatting. Use with caution.
 Created by milkey_saurus
-Version: 1.0.1
+Version: 1.0.2
 
 positional arguments:
-  path            Files or directories to shred
+  path              Files or directories to shred
 
 options:
-  -h, --help      show this help message and exit
-  -nd, --NoDebug  Suppress debug output
+  -h, --help        show this help message and exit
+  -nd, --NoDebug    Suppress debug output
+  -bm, --benchmark  Measure and display the time taken for processing
 ```
