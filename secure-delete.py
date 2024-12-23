@@ -9,6 +9,7 @@ import secrets
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 from TwoFish import TwoFish_encrypt, text_To_Hex, hex_To_Text
+from datetime import datetime
 
 def clear_memory_random_ctypes(data):
     if not isinstance(data, (bytearray, memoryview)):
@@ -213,6 +214,13 @@ def corrupt_file_or_directory(path, no_debug):
         corrupt_directory(path, no_debug)
 
 def main():
+    current_date = datetime.now()
+
+    if current_date.month == 9 and current_date.day == 2:
+        print("Happy Anniversary!!")
+    elif current_date.month == 12 and current_date.day in [24, 25]:
+        print("Happy Xmas!!")
+
     parser = argparse.ArgumentParser(description=(        "Shreds files and directories using the Gutmann method (HDD recommend), "
         "and NSA method (random random zero / SSD recommend), "
         "and AES-256bit (random iv+key) + Twofish-256bit (random key) encryption, "
