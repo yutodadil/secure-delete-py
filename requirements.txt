@@ -1,1 +1,1 @@
-PyCryptodome
+# Standard library only; encryption is no longer used.
