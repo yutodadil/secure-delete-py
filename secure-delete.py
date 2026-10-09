@@ -162,11 +162,14 @@ def _assert_target(parent, name, info):
         raise OSError("Target changed during deletion.")
 
 
-def _delete_at(parent, name, no_debug, require_directory=False, expected=None):
+def _delete_at(parent, name, no_debug, require_directory=False, expected=None,
+               filesystem_device=None):
     info = os.stat(name, dir_fd=parent, follow_symlinks=False)
     if expected is not None and (not _same_file(info, expected)
                                  or info.st_mode != expected.st_mode):
         raise OSError("Target changed before deletion.")
+    if filesystem_device is not None and info.st_dev != filesystem_device:
+        raise OSError("Refusing to cross a filesystem boundary.")
     if require_directory and not stat.S_ISDIR(info.st_mode):
         raise NotADirectoryError(errno.ENOTDIR,
                                  "Trailing separator requires a directory", name)
@@ -176,9 +179,12 @@ def _delete_at(parent, name, no_debug, require_directory=False, expected=None):
         try:
             if not _same_file(info, os.fstat(fd)):
                 raise OSError("Directory changed while opening it.")
+            child_device = (info.st_dev if filesystem_device is None
+                            else filesystem_device)
             for child in os.listdir(fd):
                 _assert_target(parent, name, info)
-                _delete_at(fd, child, no_debug)
+                _delete_at(fd, child, no_debug,
+                           filesystem_device=child_device)
             _assert_target(parent, name, info)
             os.rmdir(name, dir_fd=parent)
         finally:
