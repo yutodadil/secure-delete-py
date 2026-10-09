@@ -50,14 +50,15 @@ class FileTests(unittest.TestCase):
         calls = []
 
         def check_open(path, flags, *args, **kwargs):
-            self.assertEqual(flags & os.O_ACCMODE, os.O_WRONLY)
-            self.assertFalse(flags & os.O_TRUNC)
-            calls.append(flags)
+            if not flags & os.O_DIRECTORY:
+                self.assertEqual(flags & os.O_ACCMODE, os.O_WRONLY)
+                self.assertFalse(flags & os.O_TRUNC)
+                calls.append(flags)
             return real_open(path, flags, *args, **kwargs)
 
-        with patch.object(sd.os, "open", side_effect=check_open):
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "open", side_effect=check_open):
             sd.corrupt_file(str(self.path), True)
-        self.assertEqual(len(calls), 36)
+        self.assertEqual(len(calls), 1)
         self.assertEqual(list(Path(self.temp.name).iterdir()), [])
 
     def test_memory_does_not_scale_with_file_size(self):
@@ -111,6 +112,193 @@ class FileTests(unittest.TestCase):
             sd.corrupt_file(str(self.path), True)
         self.assertEqual(lengths, [6] * 35)
         self.assertEqual(list(Path(self.temp.name).iterdir()), [])
+
+
+class SafetyTests(unittest.TestCase):
+    def setUp(self):
+        import os
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.target = self.root / "chosen"
+        self.target.mkdir()
+        self.outside = self.root / "outside"
+        self.outside.mkdir()
+        self.sentinel = self.outside / "sentinel"
+        self.sentinel.write_bytes(b"keep me")
+
+    def assert_sentinel(self):
+        self.assertEqual(self.sentinel.read_bytes(), b"keep me")
+
+    def test_directory_links_and_cycles_rejected(self):
+        for destination in (self.outside, self.target):
+            link = self.target / "link"
+            link.symlink_to(destination, target_is_directory=True)
+            with self.assertRaises(OSError):
+                sd.corrupt_directory(self.target, True)
+            self.assert_sentinel()
+            self.assertTrue(link.is_symlink())
+            link.unlink()
+
+    def test_top_level_and_ancestor_links_rejected(self):
+        link = self.root / "link"
+        link.symlink_to(self.outside, target_is_directory=True)
+        for path in (link, link / "sentinel"):
+            with self.assertRaises(OSError):
+                sd.corrupt_file_or_directory(path, True)
+            self.assert_sentinel()
+
+    def test_file_and_broken_links_rejected(self):
+        for destination in (self.sentinel, self.root / "missing"):
+            link = self.target / "link"
+            link.symlink_to(destination)
+            with self.assertRaises(OSError):
+                sd.corrupt_file_or_directory(link, True)
+            self.assert_sentinel()
+            link.unlink()
+
+    def test_hard_links_rejected(self):
+        import os
+        link = self.target / "hard"
+        os.link(self.sentinel, link)
+        with self.assertRaises(OSError):
+            sd.corrupt_directory(self.target, True)
+        self.assert_sentinel()
+        self.assertEqual(link.read_bytes(), b"keep me")
+
+    def test_fifo_rejected_without_opening(self):
+        import os
+        fifo = self.target / "fifo"
+        os.mkfifo(fifo)
+        real_open = os.open
+        def guarded(path, flags, *args, **kwargs):
+            self.assertNotEqual(os.fspath(path), "fifo")
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "open", side_effect=guarded):
+            with self.assertRaises(OSError):
+                sd.corrupt_directory(self.target, True)
+        self.assertTrue(fifo.exists())
+
+    def test_swap_to_symlink_before_open_is_rejected(self):
+        import os
+        victim = self.target / "victim"
+        victim.write_bytes(b"original")
+        real_open = os.open
+        def swapped(path, flags, *args, **kwargs):
+            if path == "victim":
+                victim.unlink()
+                victim.symlink_to(self.sentinel)
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "open", side_effect=swapped):
+            with self.assertRaises(OSError):
+                sd.corrupt_file(victim, True)
+        self.assert_sentinel()
+
+    def test_swap_to_regular_file_before_open_is_rejected(self):
+        import os
+        victim = self.target / "victim"
+        victim.write_bytes(b"original")
+        replacement = self.target / "replacement"
+        replacement.write_bytes(b"new data")
+        real_open = os.open
+        def swapped(path, flags, *args, **kwargs):
+            if path == "victim":
+                os.replace(replacement, victim)
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "open", side_effect=swapped):
+            with self.assertRaises(OSError):
+                sd.corrupt_file(victim, True)
+        self.assertEqual(victim.read_bytes(), b"new data")
+
+    def test_directory_swap_before_open_is_rejected(self):
+        import os
+        real_open = os.open
+        def swapped(path, flags, *args, **kwargs):
+            if path == "chosen":
+                self.target.rename(self.root / "moved")
+                self.target.symlink_to(self.outside, target_is_directory=True)
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "open", side_effect=swapped):
+            with self.assertRaises(OSError):
+                sd.corrupt_directory(self.target, True)
+        self.assert_sentinel()
+
+    def test_trailing_separator_and_nested_tree(self):
+        import os
+        for relative in (False, True):
+            self.target.mkdir(exist_ok=True)
+            child = self.target / "child"
+            child.mkdir()
+            (child / "data").write_bytes(b"delete")
+            old_cwd = os.getcwd()
+            try:
+                if relative:
+                    os.chdir(self.root)
+                path = "chosen" if relative else str(self.target)
+                sd.corrupt_directory(path + os.sep, True)
+            finally:
+                os.chdir(old_cwd)
+            self.assertFalse(self.target.exists())
+            self.assert_sentinel()
+
+    def test_dangerous_paths_rejected(self):
+        for path in ("/", ".", "..", str(self.target / ".."), str(self.target) + "/."):
+            with self.assertRaises(OSError):
+                sd.corrupt_file_or_directory(path, True)
+        self.assertTrue(self.target.exists())
+
+    def test_unsupported_platform_refuses_before_open(self):
+        with patch.object(sd.os, "supports_dir_fd", set()), patch.object(sd.os, "open") as opened:
+            with self.assertRaises(OSError):
+                sd.corrupt_file(self.sentinel, True)
+            opened.assert_not_called()
+
+    def test_cli_errors_visible_and_other_arguments_continue(self):
+        import io
+        errors = io.StringIO()
+        victim = self.target / "victim"
+        victim.write_bytes(b"delete")
+        with patch.object(sd.sys, "argv", ["secure-delete", "--NoDebug", str(self.root / "missing"), str(victim)]), patch.object(sd.sys, "stderr", errors):
+            self.assertEqual(sd.main(), 1)
+        self.assertIn("deletion incomplete", errors.getvalue())
+        self.assertFalse(victim.exists())
+
+    def test_open_sync_and_unlink_failures_propagate(self):
+        victim = self.target / "victim"
+        for operation in ("_open_at", "_sync"):
+            victim.write_bytes(b"keep")
+            with patch.object(sd, "_require_safe_platform"), patch.object(sd, operation, side_effect=OSError("injected")), patch.object(sd.os, "unlink") as unlink:
+                with self.assertRaises(OSError):
+                    sd.corrupt_file(victim, True)
+                unlink.assert_not_called()
+            self.assertTrue(victim.exists())
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd, "corrupt_step"), patch.object(sd, "secure_erase"), patch.object(sd.os, "unlink", side_effect=OSError("injected")):
+            with self.assertRaises(OSError):
+                sd.corrupt_file(victim, True)
+        self.assertTrue(victim.exists())
+
+    def test_short_write_aborts_without_unlink(self):
+        victim = self.target / "victim"
+        victim.write_bytes(b"keep")
+        real_open_at = sd._open_at
+        class ShortWriter:
+            def __init__(self, fp): self.fp = fp
+            def __enter__(self): return self
+            def __exit__(self, *args): self.fp.close()
+            def fileno(self): return self.fp.fileno()
+            def seek(self, pos): return self.fp.seek(pos)
+            def write(self, data): return 0
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd, "_open_at", side_effect=lambda *args: ShortWriter(real_open_at(*args))), patch.object(sd.os, "unlink") as unlink:
+            with self.assertRaises(OSError):
+                sd.corrupt_file(victim, True)
+            unlink.assert_not_called()
+        self.assertEqual(victim.read_bytes(), b"keep")
+
+    def test_listdir_failure_does_not_remove_directory(self):
+        with patch.object(sd.os, "supports_fd", sd.os.supports_fd | {sd.os.listdir}), patch.object(sd.os, "listdir", side_effect=OSError("injected")), patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "rmdir") as remove:
+            with self.assertRaises(OSError):
+                sd.corrupt_directory(self.target, True)
+            remove.assert_not_called()
 
 
 if __name__ == "__main__":
