@@ -120,6 +120,29 @@ class FileTests(unittest.TestCase):
         sd.corrupt_file(self.path, True)
         self.assertFalse(self.path.exists())
 
+    def test_helpers_reject_invalid_or_mismatched_sizes_before_write(self):
+        self.path.write_bytes(b"keep")
+        cases = ((-1, ValueError), (True, ValueError), (4.0, ValueError),
+                 (3, OSError), (5, OSError))
+        for function in (sd.corrupt_step, sd.secure_erase):
+            for size, error in cases:
+                with self.subTest(function=function.__name__, size=size):
+                    args = ((self.path, size, b"x")
+                            if function is sd.corrupt_step
+                            else (self.path, size, True))
+                    with patch.object(sd, "_sync") as synced:
+                        with self.assertRaises(error):
+                            function(*args)
+                        synced.assert_not_called()
+                    self.assertEqual(self.path.read_bytes(), b"keep")
+
+    def test_corrupt_step_rewinds_open_file(self):
+        self.path.write_bytes(b"keep")
+        with self.path.open("r+b", buffering=0) as fp:
+            fp.seek(2)
+            sd.corrupt_step(fp, 4, b"x")
+        self.assertEqual(self.path.read_bytes(), b"xxxx")
+
 
 class SafetyTests(unittest.TestCase):
     def setUp(self):

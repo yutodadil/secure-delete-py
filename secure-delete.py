@@ -130,6 +130,16 @@ def _output(filename):
     return nullcontext(filename) if hasattr(filename, "write") else _open_write_only(filename)
 
 
+def _validate_overwrite_size(fp, filesize):
+    if (isinstance(filesize, bool) or not isinstance(filesize, int)
+            or filesize < 0):
+        raise ValueError("filesize must be a non-negative integer.")
+    info = os.fstat(fp.fileno())
+    _check_regular(info)
+    if info.st_size != filesize:
+        raise OSError("Requested overwrite size does not match the file size.")
+
+
 def corrupt_step(filename, filesize, pattern):
     if not pattern:
         return
@@ -137,6 +147,8 @@ def corrupt_step(filename, filesize, pattern):
     repeats = max(1, CHUNK_SIZE // len(pattern))
     block = pattern * repeats
     with _output(filename) as fp:
+        _validate_overwrite_size(fp, filesize)
+        fp.seek(0)
         remaining = filesize
         while remaining:
             part = memoryview(block)[:min(remaining, len(block))]
@@ -149,6 +161,7 @@ def corrupt_step(filename, filesize, pattern):
 
 def secure_erase(filename, filesize, no_debug):
     with _output(filename) as fp:
+        _validate_overwrite_size(fp, filesize)
         for pass_number in range(3):
             if not no_debug:
                 print(f"Rewriting random/random/zero {filename}... ({pass_number + 1}/3)")
