@@ -166,6 +166,33 @@ class SafetyTests(unittest.TestCase):
         self.assert_sentinel()
         self.assertEqual(link.read_bytes(), b"keep me")
 
+    def test_cross_filesystem_child_refused_before_open(self):
+        import os
+        mounted = self.target / "mounted"
+        mounted.mkdir()
+        real_stat = os.stat
+        real_open = os.open
+
+        def cross_device(path, *args, **kwargs):
+            info = real_stat(path, *args, **kwargs)
+            if path == "mounted" and kwargs.get("dir_fd") is not None:
+                fields = list(info)
+                fields[2] += 1  # st_dev
+                return os.stat_result(fields)
+            return info
+
+        def guarded_open(path, flags, *args, **kwargs):
+            self.assertNotEqual(os.fspath(path), "mounted")
+            return real_open(path, flags, *args, **kwargs)
+
+        with patch.object(sd, "_require_safe_platform"), patch.object(
+                sd.os, "stat", side_effect=cross_device), patch.object(
+                sd.os, "open", side_effect=guarded_open):
+            with self.assertRaisesRegex(OSError, "filesystem boundary"):
+                sd.corrupt_directory(self.target, True)
+        self.assertTrue(mounted.is_dir())
+        self.assert_sentinel()
+
     def test_fifo_rejected_without_opening(self):
         import os
         fifo = self.target / "fifo"
