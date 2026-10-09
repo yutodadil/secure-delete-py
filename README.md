@@ -75,6 +75,13 @@ are refused. Regular files are also validated with `fstat` after a nonblocking,
 write-only open. Each target file remains open for all overwrite passes.
 Directory descriptors read directory entries only, not file contents.
 
+The initial device/inode and mode checks are carried across the file/directory
+entrypoint, deletion dispatcher and write-only open. A replacement between
+these checks is refused before overwrite, including a regular-file replacement
+that itself passes the file-type and link-count checks. This closes those
+specific substitution windows; it does not make check-and-unlink atomic or
+support concurrent changes to the tree.
+
 Random renaming has been removed: it cannot guarantee filename sanitization
 and path-based rename can overwrite another entry or operate on a substituted
 target. Validated entries are unlinked relative to their parent directory FD.
@@ -93,7 +100,13 @@ FIFO・デバイス・ソケットは拒否します。末尾スラッシュは�
 ルート、最後の `.` / `..`、`..` を含むパスは拒否します。
 ファイル内容は読み込まず、ディレクトリの項目名だけを列挙します。
 
+入口で確認したデバイス・inode・モードを削除処理と書き込み専用openに
+引き継ぎます。検査の間に別の通常ファイルやディレクトリへ差し替えられた
+場合も、上書き前に拒否します。検査とunlinkの間など、並行変更への
+原子的な保証は引き続きありません。
+
 ランダムリネームは削除しました。失敗した対象は処理を中断し、残りの
 引数は続行します。`--NoDebug` でもエラーはstderrに表示し、1件でも
 失敗した場合は終了コード1を返します。中断前に処理済みの子ファイルは
 復元されません。並行して対象を変更するプロセスがない環境で実行してください。
+
