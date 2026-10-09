@@ -63,6 +63,12 @@ def _check_regular(info):
         raise OSError("Refusing a non-regular file.")
     if info.st_nlink != 1:
         raise OSError("Refusing a file with multiple hard links.")
+    # Rewriting a sparse or compressed file across its whole logical length can
+    # allocate far more storage than it currently uses and exhaust the volume.
+    # POSIX st_blocks is expressed in 512-byte units, independent of st_blksize.
+    blocks = getattr(info, "st_blocks", None)
+    if info.st_size and blocks is not None and blocks * 512 < info.st_size:
+        raise OSError("Refusing a sparse or compressed file.")
 
 
 @contextmanager

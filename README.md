@@ -71,8 +71,12 @@ are rejected. Use an explicit path without parent traversal.
 
 Symbolic links (including broken, ancestor and directory links), files with
 multiple hard links, and non-regular files such as FIFOs, devices and sockets
-are refused. Regular files are also validated with `fstat` after a nonblocking,
-write-only open. Each target file remains open for all overwrite passes.
+are refused. When `st_blocks` is available, files whose reported allocated size
+is smaller than their logical size are also refused before overwrite. This
+includes sparse files and may include compressed files; filling their unallocated
+range could otherwise exhaust the filesystem. Filesystems without `st_blocks`
+cannot receive this check. Regular files are also validated with `fstat` after a
+nonblocking, write-only open. Each target file remains open for all overwrite passes.
 Directory descriptors read directory entries only, not file contents. Recursive
 deletion refuses entries on a different filesystem from the explicitly selected
 top-level directory, preventing traversal into ordinary nested mount points.
@@ -103,6 +107,10 @@ POSIXのディレクトリFDとリンクを追跡しないオープンが必要�
 FIFO・デバイス・ソケットは拒否します。末尾スラッシュは使用できますが、
 ルート、最後の `.` / `..`、`..` を含むパスは拒否します。
 ファイル内容は読み込まず、ディレクトリの項目名だけを列挙します。
+`st_blocks`を利用できる環境では、割当済み容量が論理サイズより小さい
+スパースファイル（圧縮ファイルを含む場合があります）を上書き前に拒否し、
+穴の実体化によるファイルシステム枯渇を防ぎます。`st_blocks`を提供しない
+ファイルシステムではこの検査は行えません。
 明示的に指定した最上位ディレクトリと異なるファイルシステムの項目は拒否し、
 通常のマウントポイント内へ再帰しません。`st_dev`が同じbind mountは判別できず、
 並行変更と同様に非対応です。
