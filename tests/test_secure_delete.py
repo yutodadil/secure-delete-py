@@ -223,6 +223,94 @@ class SafetyTests(unittest.TestCase):
                 sd.corrupt_directory(self.target, True)
         self.assert_sentinel()
 
+    def test_replacement_before_open_at_keeps_initial_identity(self):
+        import os
+        victim = self.target / "victim"
+        victim.write_bytes(b"original")
+        replacement = self.target / "replacement"
+        replacement.write_bytes(b"replacement")
+        saved = self.target / "saved"
+        real_open_at = sd._open_at
+
+        def swapped(parent, name, *args, **kwargs):
+            if name == "victim":
+                victim.rename(saved)
+                os.replace(replacement, victim)
+            return real_open_at(parent, name, *args, **kwargs)
+
+        with patch.object(sd, "_open_at", side_effect=swapped), patch.object(
+                sd, "corrupt_step") as step, patch.object(sd, "secure_erase") as erase:
+            with self.assertRaises(OSError):
+                sd.corrupt_file_or_directory(victim, True)
+            step.assert_not_called()
+            erase.assert_not_called()
+        self.assertEqual(victim.read_bytes(), b"replacement")
+        self.assertEqual(saved.read_bytes(), b"original")
+
+    def test_recursive_replacement_before_open_at_is_rejected(self):
+        import os
+        victim = self.target / "victim"
+        victim.write_bytes(b"original")
+        replacement = self.outside / "replacement"
+        replacement.write_bytes(b"replacement")
+        saved = self.outside / "saved"
+        real_open_at = sd._open_at
+
+        def swapped(parent, name, *args, **kwargs):
+            victim.rename(saved)
+            os.replace(replacement, victim)
+            return real_open_at(parent, name, *args, **kwargs)
+
+        with patch.object(sd, "_open_at", side_effect=swapped), patch.object(
+                sd, "corrupt_step") as step, patch.object(sd, "secure_erase") as erase:
+            with self.assertRaises(OSError):
+                sd.corrupt_directory(self.target, True)
+            step.assert_not_called()
+            erase.assert_not_called()
+        self.assertEqual(victim.read_bytes(), b"replacement")
+        self.assertEqual(saved.read_bytes(), b"original")
+        self.assert_sentinel()
+
+    def test_library_entrypoints_keep_identity_across_dispatch(self):
+        import os
+        cases = ((sd.corrupt_file, False, False),
+                 (sd.corrupt_file, False, True),
+                 (sd.corrupt_directory, True, False),
+                 (sd.corrupt_directory, True, True))
+        for index, (entrypoint, was_directory, is_directory) in enumerate(cases):
+            with self.subTest(entrypoint=entrypoint.__name__, replacement_dir=is_directory):
+                victim = self.root / f"victim-{index}"
+                replacement = self.root / f"replacement-{index}"
+                saved = self.root / f"saved-{index}"
+                if was_directory:
+                    victim.mkdir()
+                    (victim / "data").write_bytes(b"original")
+                else:
+                    victim.write_bytes(b"original")
+                if is_directory:
+                    replacement.mkdir()
+                    (replacement / "data").write_bytes(b"replacement")
+                else:
+                    replacement.write_bytes(b"replacement")
+                real_delete_at = sd._delete_at
+
+                def swapped(parent, name, *args, **kwargs):
+                    if name == victim.name:
+                        victim.rename(saved)
+                        os.replace(replacement, victim)
+                    return real_delete_at(parent, name, *args, **kwargs)
+
+                with patch.object(sd, "_delete_at", side_effect=swapped), patch.object(
+                        sd, "corrupt_step") as step, patch.object(sd, "secure_erase") as erase:
+                    with self.assertRaises(OSError):
+                        entrypoint(victim, True)
+                    step.assert_not_called()
+                    erase.assert_not_called()
+                new_data = victim / "data" if is_directory else victim
+                old_data = saved / "data" if was_directory else saved
+                self.assertEqual(new_data.read_bytes(), b"replacement")
+                self.assertEqual(old_data.read_bytes(), b"original")
+
     def test_trailing_separator_and_nested_tree(self):
         import os
         for relative in (False, True):
@@ -339,7 +427,7 @@ class SafetyTests(unittest.TestCase):
             def fileno(self): return self.fp.fileno()
             def seek(self, pos): return self.fp.seek(pos)
             def write(self, data): return 0
-        with patch.object(sd, "_require_safe_platform"), patch.object(sd, "_open_at", side_effect=lambda *args: ShortWriter(real_open_at(*args))), patch.object(sd.os, "unlink") as unlink:
+        with patch.object(sd, "_require_safe_platform"), patch.object(sd, "_open_at", side_effect=lambda *args, **kwargs: ShortWriter(real_open_at(*args, **kwargs))), patch.object(sd.os, "unlink") as unlink:
             with self.assertRaises(OSError):
                 sd.corrupt_file(victim, True)
             unlink.assert_not_called()
@@ -354,3 +442,4 @@ class SafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -94,15 +94,18 @@ def _target_parent(path):
         os.close(fd)
 
 
-def _open_at(parent_fd, name):
+def _open_at(parent_fd, name, expected=None):
     before = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+    if expected is not None and (not _same_file(before, expected)
+                                 or before.st_mode != expected.st_mode):
+        raise OSError("Target changed before opening it.")
     _check_regular(before)
     fd = os.open(name, os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
                  dir_fd=parent_fd)
     try:
         info = os.fstat(fd)
         _check_regular(info)
-        if not _same_file(before, info):
+        if not _same_file(before, info) or before.st_mode != info.st_mode:
             raise OSError("Target changed while opening it.")
         return os.fdopen(fd, "wb", buffering=0)
     except BaseException:
@@ -159,8 +162,11 @@ def _assert_target(parent, name, info):
         raise OSError("Target changed during deletion.")
 
 
-def _delete_at(parent, name, no_debug, require_directory=False):
+def _delete_at(parent, name, no_debug, require_directory=False, expected=None):
     info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if expected is not None and (not _same_file(info, expected)
+                                 or info.st_mode != expected.st_mode):
+        raise OSError("Target changed before deletion.")
     if require_directory and not stat.S_ISDIR(info.st_mode):
         raise NotADirectoryError(errno.ENOTDIR,
                                  "Trailing separator requires a directory", name)
@@ -179,7 +185,8 @@ def _delete_at(parent, name, no_debug, require_directory=False):
             os.close(fd)
     else:
         _check_regular(info)
-        with _open_at(parent, name) as fp:
+        # Keep the deletion check as the baseline across the open boundary.
+        with _open_at(parent, name, expected=info) as fp:
             opened = os.fstat(fp.fileno())
             filesize = opened.st_size
             steps = [b"\x00", b"\x00", b"\x00", b"\x00", b"\x55", b"\xAA",
@@ -211,15 +218,19 @@ def _delete_at(parent, name, no_debug, require_directory=False):
 
 def corrupt_file(filename, no_debug):
     with _target_parent(filename) as (parent, name, require_directory):
-        _check_regular(os.stat(name, dir_fd=parent, follow_symlinks=False))
-        _delete_at(parent, name, no_debug, require_directory=require_directory)
+        info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        _check_regular(info)
+        _delete_at(parent, name, no_debug, require_directory=require_directory,
+                   expected=info)
 
 
 def corrupt_directory(directory, no_debug):
     with _target_parent(directory) as (parent, name, require_directory):
-        if not stat.S_ISDIR(os.stat(name, dir_fd=parent, follow_symlinks=False).st_mode):
+        info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(info.st_mode):
             raise OSError("Refusing a non-directory target.")
-        _delete_at(parent, name, no_debug, require_directory=require_directory)
+        _delete_at(parent, name, no_debug, require_directory=require_directory,
+                   expected=info)
 
 
 def corrupt_file_or_directory(path, no_debug):
@@ -277,4 +288,5 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
