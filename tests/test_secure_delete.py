@@ -66,7 +66,9 @@ class FileTests(unittest.TestCase):
         peaks = []
         for size in (128 * 1024, 2 * 1024 * 1024):
             with open(self.path, "wb") as fp:
-                fp.truncate(size)
+                block = bytes(4096)
+                for _ in range(size // len(block)):
+                    fp.write(block)
             with patch.object(sd, "CHUNK_SIZE", 4096):
                 tracemalloc.start()
                 try:
@@ -112,6 +114,11 @@ class FileTests(unittest.TestCase):
             sd.corrupt_file(str(self.path), True)
         self.assertEqual(lengths, [6] * 35)
         self.assertEqual(list(Path(self.temp.name).iterdir()), [])
+
+    def test_empty_file_is_deleted(self):
+        self.path.touch()
+        sd.corrupt_file(self.path, True)
+        self.assertFalse(self.path.exists())
 
 
 class SafetyTests(unittest.TestCase):
@@ -165,6 +172,27 @@ class SafetyTests(unittest.TestCase):
             sd.corrupt_directory(self.target, True)
         self.assert_sentinel()
         self.assertEqual(link.read_bytes(), b"keep me")
+
+    def test_sparse_file_refused_before_open_or_allocation(self):
+        sparse = self.target / "sparse"
+        logical_size = 16 * 1024 * 1024
+        with sparse.open("wb") as fp:
+            fp.truncate(logical_size)
+        before = sparse.stat()
+        if not hasattr(before, "st_blocks"):
+            self.skipTest("st_blocks is unavailable")
+        if before.st_blocks * 512 >= before.st_size:
+            self.skipTest("fixture filesystem did not create a sparse file")
+
+        with patch.object(sd, "_open_at") as opened:
+            with self.assertRaisesRegex(OSError, "sparse or compressed"):
+                sd.corrupt_file(sparse, True)
+            opened.assert_not_called()
+
+        after = sparse.stat()
+        self.assertEqual(after.st_size, before.st_size)
+        self.assertEqual(after.st_blocks, before.st_blocks)
+        self.assert_sentinel()
 
     def test_cross_filesystem_child_refused_before_open(self):
         import os
