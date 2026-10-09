@@ -24,7 +24,9 @@ and calls flush and fsync. Random passes no longer write size-squared bytes.
 The library overwrite helpers require a non-negative integer size equal to the
 opened file's current `fstat` size and always start at offset zero. Invalid or
 stale sizes are refused before the first write, preventing accidental extension,
-partial-prefix processing and negative-size loops.
+partial-prefix processing and negative-size loops. File descriptors carrying
+`O_APPEND` are detected from their actual POSIX status flags and refused; seeking
+does not disable append semantics.
 
 Original file content is not loaded into Python-owned buffers. Generated patterns
 and random bytes do use RAM. The OS may still cache file data or metadata; this
@@ -53,7 +55,8 @@ AES/Twofish暗号化工程は削除しました。外部Pythonパッケージは
 パターン上書きでファイルサイズが増えていた不具合も修正しました。
 ライブラリの上書き関数に渡すサイズは、非負整数かつopen後の`fstat`サイズと
 一致する必要があります。不正値や古いサイズは最初のwrite前に拒否し、
-常にオフセット0から開始します。
+常にオフセット0から開始します。実FDに`O_APPEND`が設定された追記モードは、
+seekで解除できないためwrite前に拒否します。
 
 生成するパターン・乱数にはRAMを使います。また、OSのキャッシュや
 スワップまで含めてRAMに元の内容が存在しないことは保証できません。

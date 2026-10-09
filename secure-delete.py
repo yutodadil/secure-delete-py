@@ -134,7 +134,15 @@ def _validate_overwrite_size(fp, filesize):
     if (isinstance(filesize, bool) or not isinstance(filesize, int)
             or filesize < 0):
         raise ValueError("filesize must be a non-negative integer.")
-    info = os.fstat(fp.fileno())
+    fd = fp.fileno()
+    try:
+        import fcntl
+    except ImportError as error:
+        raise OSError("Safe overwrite requires POSIX file-status flags.") from error
+    flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+    if flags & os.O_APPEND:
+        raise OSError("Refusing an append-mode file descriptor.")
+    info = os.fstat(fd)
     _check_regular(info)
     if info.st_size != filesize:
         raise OSError("Requested overwrite size does not match the file size.")

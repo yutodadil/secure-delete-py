@@ -143,6 +143,21 @@ class FileTests(unittest.TestCase):
             sd.corrupt_step(fp, 4, b"x")
         self.assertEqual(self.path.read_bytes(), b"xxxx")
 
+    def test_helpers_reject_append_descriptor_before_write(self):
+        import os
+        for function in (sd.corrupt_step, sd.secure_erase):
+            with self.subTest(function=function.__name__):
+                self.path.write_bytes(b"keep")
+                fd = os.open(self.path, os.O_WRONLY | os.O_APPEND)
+                with os.fdopen(fd, "wb", buffering=0) as fp:
+                    args = ((fp, 4, b"x") if function is sd.corrupt_step
+                            else (fp, 4, True))
+                    with patch.object(sd, "_sync") as synced:
+                        with self.assertRaisesRegex(OSError, "append-mode"):
+                            function(*args)
+                        synced.assert_not_called()
+                self.assertEqual(self.path.read_bytes(), b"keep")
+
 
 class SafetyTests(unittest.TestCase):
     def setUp(self):
