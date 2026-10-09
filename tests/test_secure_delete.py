@@ -226,20 +226,71 @@ class SafetyTests(unittest.TestCase):
     def test_trailing_separator_and_nested_tree(self):
         import os
         for relative in (False, True):
-            self.target.mkdir(exist_ok=True)
-            child = self.target / "child"
-            child.mkdir()
-            (child / "data").write_bytes(b"delete")
-            old_cwd = os.getcwd()
-            try:
-                if relative:
-                    os.chdir(self.root)
-                path = "chosen" if relative else str(self.target)
-                sd.corrupt_directory(path + os.sep, True)
-            finally:
-                os.chdir(old_cwd)
-            self.assertFalse(self.target.exists())
+            for suffix in ("", os.sep, os.sep * 2):
+                with self.subTest(relative=relative, suffix=suffix):
+                    self.target.mkdir(exist_ok=True)
+                    child = self.target / "child"
+                    child.mkdir()
+                    (child / "data").write_bytes(b"delete")
+                    old_cwd = os.getcwd()
+                    try:
+                        if relative:
+                            os.chdir(self.root)
+                        path = "chosen" if relative else str(self.target)
+                        sd.corrupt_directory(path + suffix, True)
+                    finally:
+                        os.chdir(old_cwd)
+                    self.assertFalse(self.target.exists())
+                    self.assert_sentinel()
+
+    def test_file_trailing_separator_cli_refuses_before_write_open(self):
+        import os
+        import io
+        for relative in (False, True):
+            for suffix in (os.sep, os.sep * 2):
+                with self.subTest(relative=relative, suffix=suffix):
+                    old_cwd = os.getcwd()
+                    real_open = os.open
+                    calls = []
+                    def guarded(path, flags, *args, **kwargs):
+                        calls.append(flags)
+                        self.assertEqual(flags & os.O_ACCMODE, os.O_RDONLY)
+                        return real_open(path, flags, *args, **kwargs)
+                    errors = io.StringIO()
+                    try:
+                        if relative:
+                            os.chdir(self.root)
+                        path = "outside/sentinel" if relative else str(self.sentinel)
+                        with patch.object(sd, "_require_safe_platform"), patch.object(sd.os, "open", side_effect=guarded), patch.object(sd.sys, "stderr", errors), patch.object(sd.sys, "argv", ["secure-delete", "--NoDebug", path + suffix]):
+                            self.assertEqual(sd.main(), 1)
+                    finally:
+                        os.chdir(old_cwd)
+                    self.assertTrue(calls)
+                    self.assertIn("Trailing separator requires a directory", errors.getvalue())
+                    self.assert_sentinel()
+
+    def test_file_trailing_separator_library_entrypoints_refuse(self):
+        for suffix in ("/", "//"):
+            path = str(self.sentinel) + suffix
+            for function in (sd.corrupt_file, sd.corrupt_directory, sd.corrupt_file_or_directory):
+                with self.assertRaises(NotADirectoryError):
+                    function(path, True)
+                self.assert_sentinel()
+            with self.assertRaises(NotADirectoryError):
+                sd.corrupt_step(path, 7, b"x")
+            with self.assertRaises(NotADirectoryError):
+                sd.secure_erase(path, 7, True)
             self.assert_sentinel()
+
+    def test_trailing_separator_symlinks_refused(self):
+        for destination in (self.outside, self.sentinel):
+            link = self.target / "link"
+            link.symlink_to(destination)
+            for suffix in ("/", "//"):
+                with self.assertRaises(NotADirectoryError):
+                    sd.corrupt_file_or_directory(str(link) + suffix, True)
+                self.assert_sentinel()
+            link.unlink()
 
     def test_dangerous_paths_rejected(self):
         for path in ("/", ".", "..", str(self.target / ".."), str(self.target) + "/."):

@@ -65,7 +65,8 @@ Deletion requires POSIX `dir_fd`, directory descriptors and `O_NOFOLLOW`
 Windows, are refused before opening the target. The tool opens every ancestor
 without following symbolic links and walks directories relative to open directory
 FDs; it does not combine `os.walk` with manual recursion. Directory names may
-have trailing separators. Root, final `.` or `..`, and paths containing `..`
+have trailing separators. Trailing separators on a regular file are rejected
+before any write-only open or overwrite; they retain their directory-only meaning. Root, final `.` or `..`, and paths containing `..`
 are rejected. Use an explicit path without parent traversal.
 
 Symbolic links (including broken, ancestor and directory links), files with

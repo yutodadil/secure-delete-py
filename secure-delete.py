@@ -3,6 +3,7 @@ import argparse
 import secrets
 import time
 import stat
+import errno
 import sys
 from contextlib import contextmanager, nullcontext
 import ctypes
@@ -67,7 +68,9 @@ def _check_regular(info):
 @contextmanager
 def _target_parent(path):
     _require_safe_platform()
-    raw = os.fsdecode(os.fspath(path)).rstrip(os.sep)
+    supplied = os.fsdecode(os.fspath(path))
+    require_directory = supplied.endswith(os.sep)
+    raw = supplied.rstrip(os.sep)
     if not raw or raw.split(os.sep)[-1] in (".", ".."):
         raise OSError("Refusing root, . or .. as a deletion target.")
     if ".." in raw.split(os.sep):
@@ -81,7 +84,12 @@ def _target_parent(path):
                              dir_fd=fd)
             os.close(fd)
             fd = new_fd
-        yield fd, parts[-1]
+        if require_directory:
+            info = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(info.st_mode):
+                raise NotADirectoryError(errno.ENOTDIR,
+                                         "Trailing separator requires a directory", supplied)
+        yield fd, parts[-1], require_directory
     finally:
         os.close(fd)
 
@@ -104,7 +112,7 @@ def _open_at(parent_fd, name):
 
 @contextmanager
 def _open_write_only(filename):
-    with _target_parent(filename) as (parent, name):
+    with _target_parent(filename) as (parent, name, require_directory):
         with _open_at(parent, name) as fp:
             yield fp
 
@@ -151,8 +159,11 @@ def _assert_target(parent, name, info):
         raise OSError("Target changed during deletion.")
 
 
-def _delete_at(parent, name, no_debug):
+def _delete_at(parent, name, no_debug, require_directory=False):
     info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+    if require_directory and not stat.S_ISDIR(info.st_mode):
+        raise NotADirectoryError(errno.ENOTDIR,
+                                 "Trailing separator requires a directory", name)
     if stat.S_ISDIR(info.st_mode):
         fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                      dir_fd=parent)
@@ -199,21 +210,21 @@ def _delete_at(parent, name, no_debug):
 
 
 def corrupt_file(filename, no_debug):
-    with _target_parent(filename) as (parent, name):
+    with _target_parent(filename) as (parent, name, require_directory):
         _check_regular(os.stat(name, dir_fd=parent, follow_symlinks=False))
-        _delete_at(parent, name, no_debug)
+        _delete_at(parent, name, no_debug, require_directory=require_directory)
 
 
 def corrupt_directory(directory, no_debug):
-    with _target_parent(directory) as (parent, name):
+    with _target_parent(directory) as (parent, name, require_directory):
         if not stat.S_ISDIR(os.stat(name, dir_fd=parent, follow_symlinks=False).st_mode):
             raise OSError("Refusing a non-directory target.")
-        _delete_at(parent, name, no_debug)
+        _delete_at(parent, name, no_debug, require_directory=require_directory)
 
 
 def corrupt_file_or_directory(path, no_debug):
-    with _target_parent(path) as (parent, name):
-        _delete_at(parent, name, no_debug)
+    with _target_parent(path) as (parent, name, require_directory):
+        _delete_at(parent, name, no_debug, require_directory=require_directory)
 
 
 def main():
