@@ -158,6 +158,27 @@ class FileTests(unittest.TestCase):
                         synced.assert_not_called()
                 self.assertEqual(self.path.read_bytes(), b"keep")
 
+    def test_helpers_reject_buffered_handle_without_flushing_it(self):
+        import os
+        for function in (sd.corrupt_step, sd.secure_erase):
+            with self.subTest(function=function.__name__):
+                self.path.write_bytes(b"keep")
+                fp = self.path.open("r+b")
+                try:
+                    fp.seek(4)
+                    fp.write(b"tail")
+                    self.assertEqual(os.fstat(fp.fileno()).st_size, 4)
+                    args = ((fp, 4, b"x") if function is sd.corrupt_step
+                            else (fp, 4, True))
+                    with patch.object(sd, "_sync") as synced:
+                        with self.assertRaisesRegex(OSError, "unbuffered FileIO"):
+                            function(*args)
+                        synced.assert_not_called()
+                    # Rejection itself must not flush the caller's pending bytes.
+                    self.assertEqual(os.fstat(fp.fileno()).st_size, 4)
+                finally:
+                    fp.close()
+
 
 class SafetyTests(unittest.TestCase):
     def setUp(self):
@@ -510,20 +531,22 @@ class SafetyTests(unittest.TestCase):
         self.assertTrue(victim.exists())
 
     def test_short_write_aborts_without_unlink(self):
+        import io
         victim = self.target / "victim"
         victim.write_bytes(b"keep")
-        real_open_at = sd._open_at
-        class ShortWriter:
-            def __init__(self, fp): self.fp = fp
-            def __enter__(self): return self
-            def __exit__(self, *args): self.fp.close()
-            def fileno(self): return self.fp.fileno()
-            def seek(self, pos): return self.fp.seek(pos)
-            def write(self, data): return 0
-        with patch.object(sd, "_require_safe_platform"), patch.object(sd, "_open_at", side_effect=lambda *args, **kwargs: ShortWriter(real_open_at(*args, **kwargs))), patch.object(sd.os, "unlink") as unlink:
+        writes = []
+        class ShortWriter(io.FileIO):
+            def write(self, data):
+                writes.append(len(data))
+                return 0
+        with patch.object(sd, "_require_safe_platform"), patch.object(
+                sd, "_open_at", side_effect=lambda *args, **kwargs:
+                ShortWriter(victim, "r+b")), patch.object(
+                sd.os, "unlink") as unlink:
             with self.assertRaises(OSError):
                 sd.corrupt_file(victim, True)
             unlink.assert_not_called()
+        self.assertTrue(writes)
         self.assertEqual(victim.read_bytes(), b"keep")
 
     def test_listdir_failure_does_not_remove_directory(self):

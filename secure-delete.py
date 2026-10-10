@@ -5,6 +5,7 @@ import time
 import stat
 import errno
 import sys
+import io
 from contextlib import contextmanager, nullcontext
 import ctypes
 from datetime import datetime
@@ -127,7 +128,12 @@ def _open_write_only(filename):
 
 
 def _output(filename):
-    return nullcontext(filename) if hasattr(filename, "write") else _open_write_only(filename)
+    if not hasattr(filename, "write"):
+        return _open_write_only(filename)
+    if (not isinstance(filename, io.FileIO) or filename.closed
+            or not filename.writable()):
+        raise OSError("Safe overwrite requires an open, writable, unbuffered FileIO.")
+    return nullcontext(filename)
 
 
 def _validate_overwrite_size(fp, filesize):
