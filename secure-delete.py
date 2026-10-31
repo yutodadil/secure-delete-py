@@ -89,8 +89,8 @@ def _target_parent(path):
         for part in parts[:-1]:
             new_fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                              dir_fd=fd)
-            os.close(fd)
-            fd = new_fd
+            old_fd, fd = fd, new_fd
+            os.close(old_fd)
         if require_directory:
             info = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
             if not stat.S_ISDIR(info.st_mode):
