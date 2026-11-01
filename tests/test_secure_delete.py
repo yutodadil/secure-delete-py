@@ -506,6 +506,23 @@ class SafetyTests(unittest.TestCase):
                 sd.corrupt_file(self.sentinel, True)
             opened.assert_not_called()
 
+    def test_ancestor_close_failure_releases_new_directory_fd(self):
+        closes = []
+
+        def close(fd):
+            closes.append(fd)
+            if fd == 10:
+                raise OSError("injected ancestor close failure")
+
+        with patch.object(sd, "_require_safe_platform"), patch.object(
+                sd.os, "open", side_effect=(10, 11)), patch.object(
+                sd.os, "close", side_effect=close):
+            with self.assertRaisesRegex(OSError, "ancestor close failure"):
+                with sd._target_parent("/ancestor/target"):
+                    self.fail("context manager must not yield")
+
+        self.assertEqual(closes, [10, 11])
+
     def test_cli_errors_visible_and_other_arguments_continue(self):
         import io
         errors = io.StringIO()
